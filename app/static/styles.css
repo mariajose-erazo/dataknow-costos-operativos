@@ -5,9 +5,45 @@ body {
     color: #1f2937;
 }
 
+.layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    width: 270px;
+    background: #111827;
+    color: white;
+    padding: 20px;
+}
+
+.sidebar h2 {
+    font-size: 20px;
+    margin-bottom: 15px;
+}
+
+.new-chat {
+    width: 100%;
+    margin-bottom: 20px;
+    background: #2563eb;
+}
+
+.conversation-item {
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-bottom: 8px;
+    background: #1f2937;
+    font-size: 14px;
+}
+
+.conversation-item:hover {
+    background: #374151;
+}
+
 .container {
-    max-width: 900px;
-    margin: 40px auto;
+    flex: 1;
+    margin: 30px;
     background: white;
     padding: 30px;
     border-radius: 16px;
@@ -43,7 +79,9 @@ button:hover {
 }
 
 .chat-box {
-    min-height: 300px;
+    min-height: 420px;
+    max-height: 520px;
+    overflow-y: auto;
     border: 1px solid #e5e7eb;
     border-radius: 12px;
     padding: 20px;
@@ -52,18 +90,32 @@ button:hover {
 }
 
 .message {
-    margin-bottom: 16px;
-    line-height: 1.5;
+    margin-bottom: 22px;
+    line-height: 1.6;
 }
 
 .user {
     font-weight: bold;
     color: #111827;
+    margin-bottom: 6px;
+}
+
+.agent-label {
+    font-weight: bold;
+    color: #2563eb;
+    margin-bottom: 6px;
 }
 
 .agent {
     color: #374151;
-    white-space: pre-wrap;
+}
+
+.agent strong {
+    color: #111827;
+}
+
+.agent ul {
+    margin-top: 8px;
 }
 
 .input-area {

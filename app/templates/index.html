@@ -4,33 +4,42 @@
     <meta charset="UTF-8">
     <title>Agente IA - Costos Operativos</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
-    <main class="container">
-        <section class="header">
-            <h1>Agente IA de Costos Operativos</h1>
-            <p>Consulta resultados del EDA, modelado predictivo y forecasting.</p>
-        </section>
+    <div class="layout">
+        <aside class="sidebar">
+            <h2>Conversaciones</h2>
+            <button class="new-chat" onclick="newConversation()">+ Nueva conversación</button>
+            <div id="conversationList"></div>
+        </aside>
 
-        <section class="examples">
-            <button onclick="askExample('¿Cuál fue el mejor modelo de forecasting y por qué?')">
-                Mejor modelo de forecasting
-            </button>
-            <button onclick="askExample('¿Qué materia prima afecta más al Equipo 1?')">
-                Materia prima Equipo 1
-            </button>
-            <button onclick="askExample('¿Cuál es la proyección del Equipo 2?')">
-                Proyección Equipo 2
-            </button>
-        </section>
+        <main class="container">
+            <section class="header">
+                <h1>Agente IA de Costos Operativos</h1>
+                <p>Consulta resultados del EDA, modelado predictivo y forecasting.</p>
+            </section>
 
-        <section class="chat-box" id="chatBox"></section>
+            <section class="examples">
+                <button onclick="askExample('¿Cuál fue el mejor modelo de forecasting y por qué?')">
+                    Mejor modelo de forecasting
+                </button>
+                <button onclick="askExample('¿Qué materia prima afecta más al Equipo 1?')">
+                    Materia prima Equipo 1
+                </button>
+                <button onclick="askExample('¿Cuál es la proyección del Equipo 2?')">
+                    Proyección Equipo 2
+                </button>
+            </section>
 
-        <section class="input-area">
-            <textarea id="questionInput" placeholder="Escribe tu pregunta..."></textarea>
-            <button onclick="sendQuestion()">Enviar</button>
-        </section>
-    </main>
+            <section class="chat-box" id="chatBox"></section>
+
+            <section class="input-area">
+                <textarea id="questionInput" placeholder="Escribe tu pregunta..."></textarea>
+                <button onclick="sendQuestion()">Enviar</button>
+            </section>
+        </main>
+    </div>
 
     <script src="/static/app.js"></script>
 </body>
