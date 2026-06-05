@@ -3,30 +3,24 @@ agent.py
 --------
 Agente conversacional de IA usando LangChain + Gemini + Azure AI Search.
 
-Este módulo será la capa lógica del agente. Su objetivo es responder preguntas
-sobre el proyecto de costos operativos usando documentos internos del análisis.
-
 Modo actual:
-- Prueba local usando Gemini y los documentos Markdown completos.
+- RAG con Azure AI Search.
+- Gemini como modelo generativo.
 - Memoria conversacional enviada desde FastAPI.
-
-Modo futuro:
-- Recuperación semántica usando Azure AI Search.
-- Exposición mediante FastAPI.
-
-Documentos fuente:
-- reports/resumen_ejecutivo.md
-- reports/resultados_eda.md
-- reports/resultados_modelado.md
-- reports/resultados_forecasting.md
-- reports/preguntas_frecuentes.md
+- Herramienta de simulación de escenarios.
+- Herramienta de consulta de forecast por fecha.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+
+from tools import simulate_material_change, get_forecast_by_date
 
 load_dotenv()
 
@@ -49,16 +43,10 @@ AZURE_SEARCH_INDEX_NAME = os.getenv("AZURE_SEARCH_INDEX_NAME")
 
 
 def get_knowledge_paths() -> List[Path]:
-    """
-    Retorna las rutas de los documentos que alimentarán el agente.
-    """
     return [REPORTS_PATH / file_name for file_name in KNOWLEDGE_FILES]
 
 
 def validate_knowledge_files() -> Dict[str, object]:
-    """
-    Verifica que todos los documentos base existan.
-    """
     paths = get_knowledge_paths()
 
     existing = [str(path) for path in paths if path.exists()]
@@ -72,48 +60,39 @@ def validate_knowledge_files() -> Dict[str, object]:
 
 
 def load_knowledge_documents() -> str:
-    """
-    Carga el contenido de los documentos base en texto plano.
-
-    Esta función permite probar el agente localmente antes de conectar
-    Azure AI Search.
-    """
     validation = validate_knowledge_files()
 
     if not validation["all_available"]:
         missing = "\n".join(validation["missing"])
-        raise FileNotFoundError(
-            f"Faltan documentos para el agente:\n{missing}"
-        )
+        raise FileNotFoundError(f"Faltan documentos para el agente:\n{missing}")
 
     contents = []
 
     for path in get_knowledge_paths():
         text = path.read_text(encoding="utf-8")
-        contents.append(f"\n\n# Fuente: {path.name}\n\n{text}")
+        contents.append(f"\n\n# Fuente local: {path.name}\n\n{text}")
 
     return "\n".join(contents)
+
+
+def is_azure_search_configured() -> bool:
+    return all(
+        [
+            AZURE_SEARCH_ENDPOINT,
+            AZURE_SEARCH_KEY,
+            AZURE_SEARCH_INDEX_NAME,
+        ]
+    )
 
 
 def format_conversation_history(
     history: Optional[List[Dict[str, str]]] = None,
     max_messages: int = 8,
 ) -> str:
-    """
-    Formatea el historial reciente de conversación para enviarlo al LLM.
-
-    Args:
-        history: lista de mensajes con estructura {"role": "...", "content": "..."}.
-        max_messages: número máximo de mensajes recientes que se enviarán.
-
-    Returns:
-        Historial como texto plano.
-    """
     if not history:
         return "No hay historial previo."
 
     recent_history = history[-max_messages:]
-
     formatted_messages = []
 
     for message in recent_history:
@@ -123,43 +102,254 @@ def format_conversation_history(
         if not content:
             continue
 
-        if role == "assistant":
-            label = "Agente"
-        else:
-            label = "Usuario"
-
+        label = "Agente" if role == "assistant" else "Usuario"
         formatted_messages.append(f"{label}: {content}")
 
     return "\n".join(formatted_messages) if formatted_messages else "No hay historial previo."
+
+
+def search_relevant_context(
+    question: str,
+    history: Optional[List[Dict[str, str]]] = None,
+    top_k: int = 3,
+) -> str:
+    if not is_azure_search_configured():
+        return load_knowledge_documents()
+
+    history_text = format_conversation_history(history, max_messages=4)
+    search_query = f"{history_text}\n\nPregunta actual: {question}"
+
+    client = SearchClient(
+        endpoint=AZURE_SEARCH_ENDPOINT,
+        index_name=AZURE_SEARCH_INDEX_NAME,
+        credential=AzureKeyCredential(AZURE_SEARCH_KEY),
+    )
+
+    results = client.search(
+        search_text=search_query,
+        top=top_k,
+    )
+
+    context_parts = []
+
+    for result in results:
+        source = result.get("source", "fuente_desconocida")
+        category = result.get("category", "categoria_desconocida")
+        content = result.get("content", "")
+
+        if content:
+            context_parts.append(
+                f"""
+Fuente: {source}
+Categoría: {category}
+
+{content}
+"""
+            )
+
+    if not context_parts:
+        return load_knowledge_documents()
+
+    return "\n\n".join(context_parts)
+
+
+def detect_scenario_question(question: str) -> Optional[Dict[str, object]]:
+    question_lower = question.lower()
+
+    material_match = re.search(r"price[_\s-]?(x|y|z)", question_lower)
+    percent_match = re.search(r"(\d+(?:[.,]\d+)?)\s*%", question_lower)
+
+    if not material_match or not percent_match:
+        return None
+
+    material_letter = material_match.group(1).upper()
+    material = f"Price_{material_letter}"
+
+    percent_change = float(percent_match.group(1).replace(",", "."))
+
+    negative_words = [
+        "baja",
+        "bajar",
+        "disminuye",
+        "disminuir",
+        "cae",
+        "caer",
+        "reduce",
+        "reducir",
+        "decrece",
+    ]
+
+    if any(word in question_lower for word in negative_words):
+        percent_change = -percent_change
+
+    if "equipo 1" in question_lower or "equipo1" in question_lower:
+        target = "Price_Equipo1"
+    elif "equipo 2" in question_lower or "equipo2" in question_lower:
+        target = "Price_Equipo2"
+    else:
+        if material == "Price_Y":
+            target = "Price_Equipo1"
+        elif material == "Price_Z":
+            target = "Price_Equipo2"
+        else:
+            target = "Price_Equipo2"
+
+    return {
+        "material": material,
+        "percent_change": percent_change,
+        "target": target,
+    }
+
+
+def build_scenario_context(question: str) -> str:
+    scenario = detect_scenario_question(question)
+
+    if not scenario:
+        return ""
+
+    simulation = simulate_material_change(
+        material=scenario["material"],
+        percent_change=scenario["percent_change"],
+        target=scenario["target"],
+    )
+
+    return f"""
+Resultado de simulación cuantitativa:
+
+- Fecha base: {simulation["date"]}
+- Materia prima analizada: {simulation["material"]}
+- Equipo objetivo: {simulation["target"]}
+- Cambio simulado en materia prima: {simulation["percent_change_material"]}%
+- Precio actual de la materia prima: {simulation["current_material_price"]}
+- Cambio absoluto en materia prima: {simulation["absolute_material_change"]}
+- Coeficiente lineal usado: {simulation["coefficient"]}
+- Precio actual del equipo: {simulation["current_target_price"]}
+- Cambio estimado en el precio del equipo: {simulation["estimated_target_change"]}
+- Nuevo precio estimado del equipo: {simulation["estimated_new_target_price"]}
+- Variación estimada del equipo: {simulation["estimated_target_percent_change"]}%
+
+Advertencia:
+Este cálculo es una aproximación lineal basada en el modelo de regresión lineal.
+No contempla shocks externos, inflación, TRM, contratos, proveedores, logística,
+cambios regulatorios ni reentrenamiento del modelo.
+"""
+
+
+def detect_forecast_date_question(question: str) -> Optional[Dict[str, object]]:
+    question_lower = question.lower()
+
+    forecast_words = [
+        "predicción",
+        "prediccion",
+        "forecast",
+        "pronóstico",
+        "pronostico",
+        "proyección",
+        "proyeccion",
+        "estimado",
+    ]
+
+    if not any(word in question_lower for word in forecast_words):
+        return None
+
+    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", question_lower)
+
+    if date_match:
+        fecha = date_match.group(1)
+    else:
+        date_match = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", question_lower)
+
+        if not date_match:
+            return None
+
+        day = int(date_match.group(1))
+        month = int(date_match.group(2))
+        year = int(date_match.group(3))
+
+        if year < 100:
+            year += 2000
+
+        fecha = f"{year:04d}-{month:02d}-{day:02d}"
+
+    if "equipo 1" in question_lower or "equipo1" in question_lower:
+        equipo = 1
+    elif "equipo 2" in question_lower or "equipo2" in question_lower:
+        equipo = 2
+    else:
+        return None
+
+    return {
+        "equipo": equipo,
+        "fecha": fecha,
+    }
+
+
+def build_forecast_context(question: str) -> str:
+    forecast_request = detect_forecast_date_question(question)
+
+    if not forecast_request:
+        return ""
+
+    forecast_result = get_forecast_by_date(
+        equipo=forecast_request["equipo"],
+        fecha=forecast_request["fecha"],
+    )
+
+    if not forecast_result["found"]:
+        return f"""
+Resultado de consulta de forecast por fecha:
+
+- Equipo consultado: Equipo {forecast_result["equipo"]}
+- Fecha consultada: {forecast_result["fecha"]}
+- Resultado: {forecast_result["message"]}
+
+Advertencia:
+Los forecasts disponibles corresponden únicamente al horizonte previamente generado en el notebook de forecasting.
+"""
+
+    return f"""
+Resultado de consulta de forecast por fecha:
+
+- Equipo consultado: Equipo {forecast_result["equipo"]}
+- Fecha consultada: {forecast_result["fecha"]}
+- Forecast estimado: {forecast_result["forecast"]}
+- Límite inferior: {forecast_result["lower_bound"]}
+- Límite superior: {forecast_result["upper_bound"]}
+
+Advertencia:
+Este forecast proviene de los resultados previamente generados por ARIMA.
+Debe interpretarse como una estimación dentro del horizonte calculado, no como un valor exacto.
+"""
 
 
 def answer_with_local_context(
     question: str,
     history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
-    """
-    Responde una pregunta usando los documentos locales como contexto
-    y el historial reciente de conversación.
-
-    Esta versión permite que el agente entienda preguntas de seguimiento como:
-    - ¿Por qué?
-    - ¿Y cuál debería priorizar?
-    - ¿Qué significa eso?
-    """
     if not GOOGLE_API_KEY:
-        raise ValueError(
-            "No se encontró GOOGLE_API_KEY. Configura tu archivo .env."
-        )
+        raise ValueError("No se encontró GOOGLE_API_KEY. Configura tu archivo .env.")
 
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
         from langchain_core.prompts import ChatPromptTemplate
     except ImportError as exc:
-        raise ImportError(
-            f"Faltan dependencias de LangChain/Gemini: {exc}"
-        )
+        raise ImportError(f"Faltan dependencias de LangChain/Gemini: {exc}")
 
-    context = load_knowledge_documents()
+    context = search_relevant_context(
+        question=question,
+        history=history,
+    )
+
+    scenario_context = build_scenario_context(question)
+
+    if scenario_context:
+        context = context + "\n\n" + scenario_context
+
+    forecast_context = build_forecast_context(question)
+
+    if forecast_context:
+        context = context + "\n\n" + forecast_context
+
     formatted_history = format_conversation_history(history)
 
     prompt = ChatPromptTemplate.from_messages(
@@ -170,12 +360,14 @@ def answer_with_local_context(
 Eres un agente de IA especializado en el proyecto de costos operativos de construcción.
 
 Tu tarea es responder preguntas usando únicamente:
-1. El contexto del proyecto.
-2. El historial reciente de la conversación.
+1. El contexto recuperado desde Azure AI Search.
+2. El historial reciente de conversación.
+3. Los resultados cuantitativos de herramientas de simulación, cuando estén disponibles.
+4. Los resultados de forecast por fecha, cuando estén disponibles.
 
 Reglas:
 1. No inventes cifras.
-2. Si la respuesta no está en el contexto ni en el historial, dilo claramente.
+2. Si la respuesta no está en el contexto, historial, simulación o forecast, dilo claramente.
 3. Responde en español.
 4. Usa lenguaje claro, profesional y orientado a negocio.
 5. Cuando menciones métricas, explica brevemente qué significan.
@@ -183,12 +375,17 @@ Reglas:
 7. Si hay incertidumbre o limitaciones, menciónalas explícitamente.
 8. Si el usuario hace una pregunta corta como "¿por qué?", "¿cuál?", "¿y eso?", interpreta la pregunta usando el historial reciente.
 9. Prioriza respuestas útiles para un director de proyecto, gerente financiero o responsable de costos.
+10. Cuando exista una simulación cuantitativa, úsala explícitamente en la respuesta.
+11. Cuando exista una consulta de forecast por fecha, usa explícitamente esos valores.
+12. Cuando sea útil, menciona de qué fuente proviene la información.
+13. Aclara que las simulaciones son aproximaciones lineales y no predicciones definitivas.
+14. Aclara que los forecasts por fecha solo están disponibles dentro del horizonte generado por ARIMA.
                 """,
             ),
             (
                 "human",
                 """
-Contexto del proyecto:
+Contexto recuperado:
 {context}
 
 Historial reciente de la conversación:
@@ -221,22 +418,14 @@ Pregunta actual del usuario:
 
 
 def check_agent_ready() -> Dict[str, object]:
-    """
-    Verifica si el agente tiene documentos y variables mínimas para funcionar.
-    """
     validation = validate_knowledge_files()
 
     return {
         "knowledge_files_ready": validation["all_available"],
         "missing_files": validation["missing"],
         "google_key_available": bool(GOOGLE_API_KEY),
-        "azure_search_configured": all(
-            [
-                AZURE_SEARCH_ENDPOINT,
-                AZURE_SEARCH_KEY,
-                AZURE_SEARCH_INDEX_NAME,
-            ]
-        ),
+        "azure_search_configured": is_azure_search_configured(),
+        "azure_search_index_name": AZURE_SEARCH_INDEX_NAME,
     }
 
 
