@@ -1,113 +1,209 @@
 """
 agent.py
 --------
-Agente conversacional de IA usando LangChain + ChromaDB + OpenAI.
+Agente conversacional de IA usando LangChain + Gemini + Azure AI Search.
 
-El agente puede responder preguntas sobre:
-- Resultados del análisis de datos
-- Proyecciones de costos
-- Comparaciones entre equipos y materias primas
-- Interpretación de los modelos
+Este módulo será la capa lógica del agente. Su objetivo es responder preguntas
+sobre el proyecto de costos operativos usando documentos internos del análisis.
+
+Modo actual:
+- Prueba local usando Gemini y los documentos Markdown completos.
+
+Modo futuro:
+- Recuperación semántica usando Azure AI Search.
+- Exposición mediante FastAPI.
+
+Documentos fuente:
+- reports/resumen_ejecutivo.md
+- reports/resultados_eda.md
+- reports/resultados_modelado.md
+- reports/resultados_forecasting.md
+- reports/preguntas_frecuentes.md
 """
 
 import os
 from pathlib import Path
+from typing import Dict, List
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+REPORTS_PATH = PROJECT_ROOT / "reports"
+
+KNOWLEDGE_FILES = [
+    "resumen_ejecutivo.md",
+    "resultados_eda.md",
+    "resultados_modelado.md",
+    "resultados_forecasting.md",
+    "preguntas_frecuentes.md",
+]
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
+AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
+AZURE_SEARCH_INDEX_NAME = os.getenv("AZURE_SEARCH_INDEX_NAME")
 
 
-def build_vector_store(documents_path: str = "reports/"):
+def get_knowledge_paths() -> List[Path]:
     """
-    Construye la base de datos vectorial (ChromaDB) a partir
-    de documentos del proyecto (informe, resultados, etc.).
-
-    Returns:
-        vectorstore: instancia de ChromaDB lista para consultas
+    Retorna las rutas de los documentos que alimentarán el agente.
     """
+    return [REPORTS_PATH / file_name for file_name in KNOWLEDGE_FILES]
+
+
+def validate_knowledge_files() -> Dict[str, object]:
+    """
+    Verifica que todos los documentos base existan.
+    """
+    paths = get_knowledge_paths()
+
+    existing = [str(path) for path in paths if path.exists()]
+    missing = [str(path) for path in paths if not path.exists()]
+
+    return {
+        "existing": existing,
+        "missing": missing,
+        "all_available": len(missing) == 0,
+    }
+
+
+def load_knowledge_documents() -> str:
+    """
+    Carga el contenido de los documentos base en texto plano.
+
+    Esta función permite probar el agente localmente antes de conectar
+    Azure AI Search.
+    """
+    validation = validate_knowledge_files()
+
+    if not validation["all_available"]:
+        missing = "\n".join(validation["missing"])
+        raise FileNotFoundError(
+            f"Faltan documentos para el agente:\n{missing}"
+        )
+
+    contents = []
+
+    for path in get_knowledge_paths():
+        text = path.read_text(encoding="utf-8")
+        contents.append(f"\n\n# Fuente: {path.name}\n\n{text}")
+
+    return "\n".join(contents)
+
+
+def answer_with_local_context(question: str) -> str:
+    """
+    Versión temporal sin Azure AI Search.
+
+    Usa los documentos cargados localmente como contexto completo.
+    Sirve para validar que la base documental del agente está bien construida.
+
+    En el siguiente paso esta lógica será reemplazada por recuperación
+    semántica usando Azure AI Search.
+    """
+    if not GOOGLE_API_KEY:
+        raise ValueError(
+            "No se encontró GOOGLE_API_KEY. Configura tu archivo .env."
+        )
+
     try:
-        from langchain_community.document_loaders import DirectoryLoader, TextLoader
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
-        from langchain_community.vectorstores import Chroma
-        from langchain_openai import OpenAIEmbeddings
-    except ImportError as e:
-        raise ImportError(f"Instala las dependencias necesarias: {e}")
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        from langchain_core.prompts import ChatPromptTemplate
+    except ImportError as exc:
+        raise ImportError(
+            f"Faltan dependencias de LangChain/Gemini: {exc}"
+        )
 
-    loader = DirectoryLoader(documents_path, glob="**/*.md", loader_cls=TextLoader)
-    documents = loader.load()
+    context = load_knowledge_documents()
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = splitter.split_documents(documents)
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """
+Eres un agente de IA especializado en el proyecto de costos operativos de construcción.
 
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    vectorstore = Chroma.from_documents(chunks, embeddings, persist_directory="chroma_db/")
-    return vectorstore
+Tu tarea es responder preguntas usando únicamente el contexto proporcionado.
 
+Reglas:
+1. No inventes cifras.
+2. Si la respuesta no está en el contexto, dilo claramente.
+3. Responde en español.
+4. Usa lenguaje claro, profesional y orientado a negocio.
+5. Cuando menciones métricas, explica brevemente qué significan.
+6. Si la pregunta es de decisión gerencial, responde con recomendación y justificación.
+7. Si hay incertidumbre o limitaciones, menciónalas explícitamente.
+                """,
+            ),
+            (
+                "human",
+                """
+Contexto del proyecto:
+{context}
 
-def build_agent(vectorstore):
-    """
-    Construye el agente conversacional con memoria y contexto.
-
-    Args:
-        vectorstore: base de datos vectorial con el conocimiento del proyecto
-
-    Returns:
-        chain: cadena de conversación lista para responder preguntas
-    """
-    try:
-        from langchain_openai import ChatOpenAI
-        from langchain.chains import ConversationalRetrievalChain
-        from langchain.memory import ConversationBufferMemory
-    except ImportError as e:
-        raise ImportError(f"Instala las dependencias necesarias: {e}")
-
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.2,
-        openai_api_key=OPENAI_API_KEY
+Pregunta del usuario:
+{question}
+                """,
+            ),
+        ]
     )
 
-    memory = ConversationBufferMemory(
-        memory_key="chat_history",
-        return_messages=True
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        temperature=0.1,
+        google_api_key=GOOGLE_API_KEY,
     )
 
-    chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 4}),
-        memory=memory,
-        verbose=False
+    chain = prompt | llm
+    response = chain.invoke(
+        {
+            "context": context,
+            "question": question,
+        }
     )
-    return chain
+
+    return response.content
 
 
-def ask_agent(chain, question: str) -> str:
+def check_agent_ready() -> Dict[str, object]:
     """
-    Envía una pregunta al agente y retorna la respuesta.
-
-    Args:
-        chain: agente conversacional construido con build_agent()
-        question: pregunta en lenguaje natural
-
-    Returns:
-        respuesta del agente como string
+    Verifica si el agente tiene documentos y variables mínimas para funcionar.
     """
-    result = chain({"question": question})
-    return result["answer"]
+    validation = validate_knowledge_files()
+
+    return {
+        "knowledge_files_ready": validation["all_available"],
+        "missing_files": validation["missing"],
+        "google_key_available": bool(GOOGLE_API_KEY),
+        "azure_search_configured": all(
+            [
+                AZURE_SEARCH_ENDPOINT,
+                AZURE_SEARCH_KEY,
+                AZURE_SEARCH_INDEX_NAME,
+            ]
+        ),
+    }
 
 
 if __name__ == "__main__":
-    print("Construyendo base de conocimiento...")
-    vectorstore = build_vector_store()
-    agent = build_agent(vectorstore)
+    status = check_agent_ready()
+    print("Estado del agente:")
+    print(status)
 
-    print("Agente listo. Escribe 'salir' para terminar.\n")
-    while True:
-        question = input("Tu pregunta: ").strip()
-        if question.lower() in ["salir", "exit", "quit"]:
-            break
+    if not status["knowledge_files_ready"]:
+        print("\nFaltan documentos. Revisa la carpeta reports/.")
+    elif not status["google_key_available"]:
+        print("\nFalta GOOGLE_API_KEY. Configura tu archivo .env.")
+    else:
+        print("\nAgente listo para prueba local.")
+        question = input("Pregunta de prueba: ").strip()
+
         if question:
-            answer = ask_agent(agent, question)
-            print(f"\nAgente: {answer}\n")
+            answer = answer_with_local_context(question)
+            print("\nRespuesta:")
+            print(answer)
+        else:
+            print("\nNo se ingresó ninguna pregunta.")
