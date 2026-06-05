@@ -1,0 +1,64 @@
+# Entornos virtuales
+.claude/
+_insert_section.py
+venv/
+env/
+.env/
+.venv/
+ENV/
+
+# Variables de entorno
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.pyd
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb~
+
+# Datos sensibles o grandes
+data/raw/*.csv
+data/raw/*.xlsx
+data/raw/*.json
+data/processed/*.csv
+data/processed/*.pkl
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs y temporales
+*.log
+*.tmp
+*.cache
+logs/
+
+# Modelos entrenados (si son pesados)
+models/
+*.pkl
+*.joblib
+*.h5
+
+# Reportes generados automáticamente
+reports/figures/
+
+# ChromaDB
+chroma_db/
