@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -25,8 +26,14 @@ app.mount(
 )
 
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     question: str
+    history: Optional[List[ChatMessage]] = []
 
 
 class ChatResponse(BaseModel):
@@ -50,10 +57,26 @@ def home():
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     if not request.question.strip():
-        raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía.")
+        raise HTTPException(
+            status_code=400,
+            detail="La pregunta no puede estar vacía.",
+        )
 
     try:
-        answer = answer_with_local_context(request.question)
+        history = [
+            {
+                "role": message.role,
+                "content": message.content,
+            }
+            for message in request.history
+        ]
+
+        answer = answer_with_local_context(
+            question=request.question,
+            history=history,
+        )
+
         return ChatResponse(answer=answer)
+
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

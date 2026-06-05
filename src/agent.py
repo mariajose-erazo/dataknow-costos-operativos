@@ -8,6 +8,7 @@ sobre el proyecto de costos operativos usando documentos internos del análisis.
 
 Modo actual:
 - Prueba local usando Gemini y los documentos Markdown completos.
+- Memoria conversacional enviada desde FastAPI.
 
 Modo futuro:
 - Recuperación semántica usando Azure AI Search.
@@ -23,7 +24,7 @@ Documentos fuente:
 
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -94,15 +95,56 @@ def load_knowledge_documents() -> str:
     return "\n".join(contents)
 
 
-def answer_with_local_context(question: str) -> str:
+def format_conversation_history(
+    history: Optional[List[Dict[str, str]]] = None,
+    max_messages: int = 8,
+) -> str:
     """
-    Versión temporal sin Azure AI Search.
+    Formatea el historial reciente de conversación para enviarlo al LLM.
 
-    Usa los documentos cargados localmente como contexto completo.
-    Sirve para validar que la base documental del agente está bien construida.
+    Args:
+        history: lista de mensajes con estructura {"role": "...", "content": "..."}.
+        max_messages: número máximo de mensajes recientes que se enviarán.
 
-    En el siguiente paso esta lógica será reemplazada por recuperación
-    semántica usando Azure AI Search.
+    Returns:
+        Historial como texto plano.
+    """
+    if not history:
+        return "No hay historial previo."
+
+    recent_history = history[-max_messages:]
+
+    formatted_messages = []
+
+    for message in recent_history:
+        role = message.get("role", "user")
+        content = message.get("content", "")
+
+        if not content:
+            continue
+
+        if role == "assistant":
+            label = "Agente"
+        else:
+            label = "Usuario"
+
+        formatted_messages.append(f"{label}: {content}")
+
+    return "\n".join(formatted_messages) if formatted_messages else "No hay historial previo."
+
+
+def answer_with_local_context(
+    question: str,
+    history: Optional[List[Dict[str, str]]] = None,
+) -> str:
+    """
+    Responde una pregunta usando los documentos locales como contexto
+    y el historial reciente de conversación.
+
+    Esta versión permite que el agente entienda preguntas de seguimiento como:
+    - ¿Por qué?
+    - ¿Y cuál debería priorizar?
+    - ¿Qué significa eso?
     """
     if not GOOGLE_API_KEY:
         raise ValueError(
@@ -118,6 +160,7 @@ def answer_with_local_context(question: str) -> str:
         )
 
     context = load_knowledge_documents()
+    formatted_history = format_conversation_history(history)
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -126,16 +169,20 @@ def answer_with_local_context(question: str) -> str:
                 """
 Eres un agente de IA especializado en el proyecto de costos operativos de construcción.
 
-Tu tarea es responder preguntas usando únicamente el contexto proporcionado.
+Tu tarea es responder preguntas usando únicamente:
+1. El contexto del proyecto.
+2. El historial reciente de la conversación.
 
 Reglas:
 1. No inventes cifras.
-2. Si la respuesta no está en el contexto, dilo claramente.
+2. Si la respuesta no está en el contexto ni en el historial, dilo claramente.
 3. Responde en español.
 4. Usa lenguaje claro, profesional y orientado a negocio.
 5. Cuando menciones métricas, explica brevemente qué significan.
 6. Si la pregunta es de decisión gerencial, responde con recomendación y justificación.
 7. Si hay incertidumbre o limitaciones, menciónalas explícitamente.
+8. Si el usuario hace una pregunta corta como "¿por qué?", "¿cuál?", "¿y eso?", interpreta la pregunta usando el historial reciente.
+9. Prioriza respuestas útiles para un director de proyecto, gerente financiero o responsable de costos.
                 """,
             ),
             (
@@ -144,7 +191,10 @@ Reglas:
 Contexto del proyecto:
 {context}
 
-Pregunta del usuario:
+Historial reciente de la conversación:
+{history}
+
+Pregunta actual del usuario:
 {question}
                 """,
             ),
@@ -152,15 +202,17 @@ Pregunta del usuario:
     )
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-2.5-flash-lite",
         temperature=0.1,
         google_api_key=GOOGLE_API_KEY,
     )
 
     chain = prompt | llm
+
     response = chain.invoke(
         {
             "context": context,
+            "history": formatted_history,
             "question": question,
         }
     )

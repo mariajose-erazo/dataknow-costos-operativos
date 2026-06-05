@@ -92,7 +92,13 @@ async function sendQuestion() {
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ question })
+            body: JSON.stringify({
+                question: question,
+                history: conversation.messages.map(message => ({
+                    role: message.type === "user" ? "user" : "assistant",
+                    content: message.text
+                }))
+            })
         });
 
         const data = await response.json();

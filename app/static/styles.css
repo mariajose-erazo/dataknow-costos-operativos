@@ -118,6 +118,15 @@ button:hover {
     margin-top: 8px;
 }
 
+.agent p {
+    margin-top: 6px;
+    margin-bottom: 10px;
+}
+
+.agent li {
+    margin-bottom: 6px;
+}
+
 .input-area {
     display: flex;
     gap: 10px;
