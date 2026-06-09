@@ -21,6 +21,7 @@ from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 
 from tools import simulate_material_change, get_forecast_by_date
+from dynamic_forecast import get_dynamic_forecast_by_date
 
 load_dotenv()
 
@@ -111,7 +112,7 @@ def format_conversation_history(
 def search_relevant_context(
     question: str,
     history: Optional[List[Dict[str, str]]] = None,
-    top_k: int = 3,
+    top_k: int = 5,
 ) -> str:
     if not is_azure_search_configured():
         return load_knowledge_documents()
@@ -283,42 +284,206 @@ def detect_forecast_date_question(question: str) -> Optional[Dict[str, object]]:
         "fecha": fecha,
     }
 
+def get_risk_indicator(confidence_score: float):
+
+    if confidence_score >= 80:
+        return "🟢 Baja"
+
+    if confidence_score >= 50:
+        return "🟡 Media"
+
+    if confidence_score >= 20:
+        return "🟠 Alta"
+
+    return "🔴 Muy Alta"
+
+
 
 def build_forecast_context(question: str) -> str:
+    """
+    Construye contexto adicional si la pregunta requiere forecast por fecha.
+
+    Primero intenta consultar el forecast precalculado en CSV.
+    Si la fecha no existe en el CSV y es posterior al histórico,
+    genera un forecast dinámico con ARIMA.
+    """
+
     forecast_request = detect_forecast_date_question(question)
 
     if not forecast_request:
         return ""
 
+    equipo = forecast_request["equipo"]
+    fecha = forecast_request["fecha"]
+
     forecast_result = get_forecast_by_date(
-        equipo=forecast_request["equipo"],
-        fecha=forecast_request["fecha"],
+        equipo=equipo,
+        fecha=fecha,
     )
 
-    if not forecast_result["found"]:
+    # =====================================================
+    # FORECAST PRECALCULADO (CSV)
+    # =====================================================
+
+    if forecast_result["found"]:
+
+        uncertainty_width = (
+            forecast_result["upper_bound"]
+            - forecast_result["lower_bound"]
+        )
+
+        uncertainty_pct = (
+            uncertainty_width
+            / forecast_result["forecast"]
+        ) * 100
+
+        confidence_score = max(
+            0,
+            100 - uncertainty_pct
+        )
+
+        risk_indicator = get_risk_indicator(
+            confidence_score
+        )
+
+        if uncertainty_pct < 20:
+            uncertainty_level = "Baja"
+        elif uncertainty_pct < 50:
+            uncertainty_level = "Media"
+        elif uncertainty_pct < 100:
+            uncertainty_level = "Alta"
+        else:
+            uncertainty_level = "Muy Alta"
+
+        return f"""
+╔════════════════════════════════════╗
+║ FORECAST EQUIPO {forecast_result["equipo"]}
+╚════════════════════════════════════╝
+
+Fecha consultada:
+{forecast_result["fecha"]}
+
+Valor esperado:
+{forecast_result["forecast"]:.2f}
+
+Rango probable:
+{forecast_result["lower_bound"]:.2f}
+-
+{forecast_result["upper_bound"]:.2f}
+
+Confiabilidad:
+{confidence_score:.2f}%
+
+Nivel de riesgo:
+{risk_indicator}
+
+Interpretación:
+
+El valor más probable para la fecha
+consultada es {forecast_result["forecast"]:.2f}.
+
+Existe incertidumbre asociada al modelo,
+por lo que el valor real podría ubicarse
+dentro del rango estimado.
+"""
+
+    # =====================================================
+    # FORECAST DINÁMICO
+    # =====================================================
+
+    dynamic_result = get_dynamic_forecast_by_date(
+        equipo=equipo,
+        fecha=fecha,
+    )
+
+    if not dynamic_result["found"]:
+
         return f"""
 Resultado de consulta de forecast por fecha:
 
-- Equipo consultado: Equipo {forecast_result["equipo"]}
-- Fecha consultada: {forecast_result["fecha"]}
-- Resultado: {forecast_result["message"]}
+- Equipo consultado:
+  Equipo {equipo}
+
+- Fecha consultada:
+  {fecha}
+
+- Resultado:
+  {dynamic_result["message"]}
 
 Advertencia:
-Los forecasts disponibles corresponden únicamente al horizonte previamente generado en el notebook de forecasting.
+
+No fue posible generar un forecast
+para esta fecha.
 """
 
-    return f"""
-Resultado de consulta de forecast por fecha:
+    confidence_score = max(
+        0,
+        100 - dynamic_result["uncertainty_pct"]
+    )
 
-- Equipo consultado: Equipo {forecast_result["equipo"]}
-- Fecha consultada: {forecast_result["fecha"]}
-- Forecast estimado: {forecast_result["forecast"]}
-- Límite inferior: {forecast_result["lower_bound"]}
-- Límite superior: {forecast_result["upper_bound"]}
+    risk_indicator = get_risk_indicator(
+        confidence_score
+    )
+
+    return f"""
+Resultado de forecast dinámico:
+
+- Tipo de forecast:
+  Dinámico con ARIMA
+
+- Modelo usado:
+  {dynamic_result["model"]}
+
+- Equipo consultado:
+  Equipo {dynamic_result["equipo"]}
+
+- Fecha consultada:
+  {dynamic_result["fecha"]}
+
+- Última fecha histórica:
+  {dynamic_result["last_historical_date"]}
+
+- Días proyectados:
+  {dynamic_result["days_ahead"]}
+
+- Horizonte:
+  {dynamic_result["forecast_horizon"]}
+
+--------------------------------------------------
+
+- Forecast estimado:
+  {dynamic_result["forecast"]}
+
+- Confiabilidad estimada:
+  {confidence_score:.2f}%
+
+- Nivel de incertidumbre:
+  {dynamic_result["uncertainty_level"]}
+
+--------------------------------------------------
+
+- Rango esperado:
+
+  Mínimo:
+  {dynamic_result["lower_bound"]}
+
+  Máximo:
+  {dynamic_result["upper_bound"]}
+
+--------------------------------------------------
 
 Advertencia:
-Este forecast proviene de los resultados previamente generados por ARIMA.
-Debe interpretarse como una estimación dentro del horizonte calculado, no como un valor exacto.
+
+La fecha consultada se encuentra
+a {dynamic_result["days_ahead"]} días
+del último dato histórico.
+
+La incertidumbre aumenta conforme
+crece la distancia respecto al histórico.
+
+Este forecast debe interpretarse como
+un escenario probable y no como un
+valor exacto.
 """
 
 
@@ -328,6 +493,15 @@ def answer_with_local_context(
 ) -> str:
     if not GOOGLE_API_KEY:
         raise ValueError("No se encontró GOOGLE_API_KEY. Configura tu archivo .env.")
+
+            # =====================================================
+    # RESPUESTA DIRECTA PARA FORECASTS
+    # =====================================================
+
+    forecast_context = build_forecast_context(question)
+
+    if forecast_context:
+        return forecast_context       
 
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -344,11 +518,6 @@ def answer_with_local_context(
 
     if scenario_context:
         context = context + "\n\n" + scenario_context
-
-    forecast_context = build_forecast_context(question)
-
-    if forecast_context:
-        context = context + "\n\n" + forecast_context
 
     formatted_history = format_conversation_history(history)
 
@@ -380,6 +549,15 @@ Reglas:
 12. Cuando sea útil, menciona de qué fuente proviene la información.
 13. Aclara que las simulaciones son aproximaciones lineales y no predicciones definitivas.
 14. Aclara que los forecasts por fecha solo están disponibles dentro del horizonte generado por ARIMA.
+15. Cuando exista información de incertidumbre, inclúyela explícitamente en la respuesta.
+16. Si la incertidumbre es Alta o Muy Alta, advierte que la predicción debe interpretarse con cautela.
+17. Explica que la confiabilidad disminuye conforme aumenta la distancia respecto al último dato histórico disponible.
+18. No te limites a repetir datos del contexto.
+19. Explica por qué el dato es relevante para el negocio.
+20. Siempre traduce correlaciones, métricas y estadísticas a implicaciones operativas.
+21. Cuando una variable sea importante para un equipo, explica cómo podría afectar los costos o la toma de decisiones.
+22. Si la respuesta contiene una métrica numérica, añade una breve interpretación ejecutiva.
+23. Prioriza el análisis y la explicación antes que la repetición literal del contexto.
                 """,
             ),
             (
@@ -400,7 +578,7 @@ Pregunta actual del usuario:
 
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite",
-        temperature=0.1,
+        temperature=0.,
         google_api_key=GOOGLE_API_KEY,
     )
 
