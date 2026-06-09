@@ -50,31 +50,23 @@ def validate_env():
         raise ValueError(f"Faltan variables en .env: {', '.join(missing)}")
 
 
-def chunk_text(text: str, max_chars: int = 1200):
+def chunk_text(text: str):
     """
-    Divide el texto en fragmentos manejables.
+    Divide documentos Markdown usando encabezados ###.
+    Ideal para FAQs y documentación estructurada.
     """
-    paragraphs = re.split(r"\n\s*\n", text)
+
+    sections = re.split(r"\n(?=### )", text)
+
     chunks = []
-    current = ""
 
-    for paragraph in paragraphs:
-        paragraph = paragraph.strip()
+    for section in sections:
+        section = section.strip()
 
-        if not paragraph:
-            continue
-
-        if len(current) + len(paragraph) + 2 <= max_chars:
-            current += "\n\n" + paragraph if current else paragraph
-        else:
-            chunks.append(current)
-            current = paragraph
-
-    if current:
-        chunks.append(current)
+        if section:
+            chunks.append(section)
 
     return chunks
-
 
 def create_index():
     """

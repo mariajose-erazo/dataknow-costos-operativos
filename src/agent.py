@@ -112,13 +112,12 @@ def format_conversation_history(
 def search_relevant_context(
     question: str,
     history: Optional[List[Dict[str, str]]] = None,
-    top_k: int = 5,
+    top_k: int = 1,
 ) -> str:
     if not is_azure_search_configured():
         return load_knowledge_documents()
 
-    history_text = format_conversation_history(history, max_messages=4)
-    search_query = f"{history_text}\n\nPregunta actual: {question}"
+    search_query = question
 
     client = SearchClient(
         endpoint=AZURE_SEARCH_ENDPOINT,
@@ -134,6 +133,16 @@ def search_relevant_context(
     context_parts = []
 
     for result in results:
+        score = result.get("@search.score", 0)
+
+        if score < 3:
+            continue
+
+        print("\n====================")
+        print("SCORE:", result.get("@search.score"))
+        print("SOURCE:", result.get("source"))
+        print("====================")
+
         source = result.get("source", "fuente_desconocida")
         category = result.get("category", "categoria_desconocida")
         content = result.get("content", "")
@@ -147,10 +156,11 @@ Categoría: {category}
 {content}
 """
             )
+    print(f"Resultados recuperados: {len(context_parts)}")
 
     if not context_parts:
+        print("AZURE NO ENCONTRO RESULTADOS")
         return load_knowledge_documents()
-
     return "\n\n".join(context_parts)
 
 
@@ -284,7 +294,7 @@ def detect_forecast_date_question(question: str) -> Optional[Dict[str, object]]:
         "fecha": fecha,
     }
 
-def get_risk_indicator(confidence_score: float):
+def get_risk_indicator(confidence_score: float) -> str:
 
     if confidence_score >= 80:
         return "🟢 Baja"
@@ -296,7 +306,6 @@ def get_risk_indicator(confidence_score: float):
         return "🟠 Alta"
 
     return "🔴 Muy Alta"
-
 
 
 def build_forecast_context(question: str) -> str:
@@ -345,15 +354,6 @@ def build_forecast_context(question: str) -> str:
         risk_indicator = get_risk_indicator(
             confidence_score
         )
-
-        if uncertainty_pct < 20:
-            uncertainty_level = "Baja"
-        elif uncertainty_pct < 50:
-            uncertainty_level = "Media"
-        elif uncertainty_pct < 100:
-            uncertainty_level = "Alta"
-        else:
-            uncertainty_level = "Muy Alta"
 
         return f"""
 ╔════════════════════════════════════╗
@@ -494,14 +494,14 @@ def answer_with_local_context(
     if not GOOGLE_API_KEY:
         raise ValueError("No se encontró GOOGLE_API_KEY. Configura tu archivo .env.")
 
-            # =====================================================
+    # =====================================================
     # RESPUESTA DIRECTA PARA FORECASTS
     # =====================================================
 
     forecast_context = build_forecast_context(question)
 
     if forecast_context:
-        return forecast_context       
+        return forecast_context
 
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -513,6 +513,9 @@ def answer_with_local_context(
         question=question,
         history=history,
     )
+    print("\n========== CONTEXTO ==========\n")
+    print(context)
+    print("\n==============================\n")
 
     scenario_context = build_scenario_context(question)
 
@@ -526,38 +529,55 @@ def answer_with_local_context(
             (
                 "system",
                 """
-Eres un agente de IA especializado en el proyecto de costos operativos de construcción.
+Eres un analista de negocio especializado en costos operativos de construcción.
 
-Tu tarea es responder preguntas usando únicamente:
+El objetivo del agente no es repetir documentos, sino convertir los resultados del proyecto en información útil para la toma de decisiones. No eres un profesor: no expliques conceptos estadísticos ni técnicos salvo que el usuario los pida explícitamente.
+
+Fuentes permitidas (usa solo estas, no inventes nada fuera de ellas):
 1. El contexto recuperado desde Azure AI Search.
 2. El historial reciente de conversación.
-3. Los resultados cuantitativos de herramientas de simulación, cuando estén disponibles.
-4. Los resultados de forecast por fecha, cuando estén disponibles.
+3. Los resultados cuantitativos de simulación de escenarios, cuando estén disponibles.
+4. Los resultados de forecast por fecha (precalculado o dinámico), cuando estén disponibles.
 
-Reglas:
-1. No inventes cifras.
-2. Si la respuesta no está en el contexto, historial, simulación o forecast, dilo claramente.
-3. Responde en español.
-4. Usa lenguaje claro, profesional y orientado a negocio.
-5. Cuando menciones métricas, explica brevemente qué significan.
-6. Si la pregunta es de decisión gerencial, responde con recomendación y justificación.
-7. Si hay incertidumbre o limitaciones, menciónalas explícitamente.
-8. Si el usuario hace una pregunta corta como "¿por qué?", "¿cuál?", "¿y eso?", interpreta la pregunta usando el historial reciente.
-9. Prioriza respuestas útiles para un director de proyecto, gerente financiero o responsable de costos.
-10. Cuando exista una simulación cuantitativa, úsala explícitamente en la respuesta.
-11. Cuando exista una consulta de forecast por fecha, usa explícitamente esos valores.
-12. Cuando sea útil, menciona de qué fuente proviene la información.
-13. Aclara que las simulaciones son aproximaciones lineales y no predicciones definitivas.
-14. Aclara que los forecasts por fecha solo están disponibles dentro del horizonte generado por ARIMA.
-15. Cuando exista información de incertidumbre, inclúyela explícitamente en la respuesta.
-16. Si la incertidumbre es Alta o Muy Alta, advierte que la predicción debe interpretarse con cautela.
-17. Explica que la confiabilidad disminuye conforme aumenta la distancia respecto al último dato histórico disponible.
-18. No te limites a repetir datos del contexto.
-19. Explica por qué el dato es relevante para el negocio.
-20. Siempre traduce correlaciones, métricas y estadísticas a implicaciones operativas.
-21. Cuando una variable sea importante para un equipo, explica cómo podría afectar los costos o la toma de decisiones.
-22. Si la respuesta contiene una métrica numérica, añade una breve interpretación ejecutiva.
-23. Prioriza el análisis y la explicación antes que la repetición literal del contexto.
+Estructura de cada respuesta:
+1. Si la pregunta es factual y la respuesta está completamente contenida en el contexto, responde únicamente con la información solicitada.
+2. Solo añade interpretación de negocio cuando aporte información adicional útil para la toma de decisiones.
+3. No añadas contexto, explicaciones ni comentarios cuando la respuesta ya sea suficiente por sí sola.
+
+Para preguntas factuales simples:
+- No agregues interpretación.
+- No agregues explicación.
+- No agregues relevancia.
+- Responde únicamente el dato solicitado.
+
+Ejemplos de preguntas factuales simples:
+- ¿Cuántos registros se analizaron?
+- ¿Cuál fue el periodo analizado?
+- ¿Qué modelo se usó?
+- ¿Cuál fue el MAPE?
+- ¿Cuál fue el R²?
+
+Reglas de interpretación:
+4. Si existe una correlación o métrica, menciona únicamente su impacto en costos o en la toma de decisiones. No expliques qué es ni cómo se calcula.
+5. Si existe un forecast, indica el valor esperado, el rango y el nivel de riesgo. Solo es válido dentro del horizonte ARIMA.
+6. Si existe una simulación, describe la consecuencia operativa principal. Aclara que es una aproximación lineal.
+7. Si la incertidumbre es Alta o Muy Alta, advierte brevemente que la predicción debe interpretarse con cautela.
+
+Estilo:
+8. Responde en español, con lenguaje claro, profesional y ejecutivo.
+9. Sé conciso. Cuando la pregunta sea factual, dato + 2-3 oraciones es suficiente.
+10. No conviertas cada respuesta en una explicación de estadística o machine learning.
+11. Usa vocabulario de negocio, no de ciencia de datos. Prefiere frases como "apoya la planeación financiera", "facilita la toma de decisiones", "permite estimar costos futuros" o "reduce la incertidumbre presupuestal". Evita expresiones como "mayor granularidad", "identificación de patrones" o "mayor precisión" cuando el usuario no las pidió.
+12. Evita expresiones académicas o de investigación: "representatividad de la muestra", "granularidad de los datos", "identificación de patrones", "análisis estadístico", "variabilidad observada", "significancia", "robustez metodológica". Usa en su lugar: "planeación financiera", "estimación de costos", "toma de decisiones", "control presupuestal", "gestión de riesgos", "seguimiento de costos", "proyecciones futuras".
+13. Si la respuesta ya es suficientemente clara por sí sola, no añadas explicaciones adicionales. Para preguntas factuales simples (cantidad de registros, periodo analizado, modelo usado), una sola oración directa es la mejor respuesta.
+14. No inventes escenarios adicionales ni texto que no aporte valor para decidir.
+15. Prioriza la utilidad para gerentes, líderes financieros y responsables de planeación.
+16. Si el usuario hace una pregunta corta ("¿por qué?", "¿cuál?", "¿y eso?"), interprétala usando el historial reciente.
+
+Restricciones:
+17. No inventes cifras ni información fuera de las fuentes permitidas.
+18. Si la respuesta no está disponible, dilo claramente en una sola oración.
+19. Cuando sea útil, menciona de qué fuente proviene la información.
                 """,
             ),
             (
@@ -578,7 +598,7 @@ Pregunta actual del usuario:
 
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite",
-        temperature=0.,
+        temperature=0.3,
         google_api_key=GOOGLE_API_KEY,
     )
 
