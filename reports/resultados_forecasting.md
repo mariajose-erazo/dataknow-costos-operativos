@@ -74,25 +74,25 @@ Horizonte:
 ### Equipo 1
 
 - Precio actual: 451.73
-- Precio promedio proyectado: 452.58
-- Mínimo proyectado: 414.70
-- Máximo proyectado: 488.38
-- Variación esperada: 0.19%
+- Precio promedio proyectado: 456.03
+- Mínimo proyectado: 455.90
+- Máximo proyectado: 457.12
+- Variación esperada: 0.95%
 
 ### Equipo 2
 
 - Precio actual: 955.35
-- Precio promedio proyectado: 1069.38
-- Mínimo proyectado: 1043.33
-- Máximo proyectado: 1114.74
-- Variación esperada: 11.94%
+- Precio promedio proyectado: 941.42
+- Mínimo proyectado: 941.42
+- Máximo proyectado: 941.42
+- Variación esperada: -1.46%
 
 ---
 
 ## Conclusiones
 
 - ARIMA superó ampliamente a Prophet.
-- El Equipo 1 presenta estabilidad relativa en el horizonte proyectado.
-- El Equipo 2 presenta una expectativa de crecimiento cercana al 12%.
+- El Equipo 1 presenta estabilidad relativa en el horizonte proyectado, con una variación esperada cercana a +0.95%.
+- El Equipo 2 también se proyecta estable, con una ligera variación esperada de -1.46% respecto al último precio observado.
 - Las proyecciones deben interpretarse como escenarios probables y no como valores exactos.
 - Los intervalos de confianza muestran la incertidumbre inherente a los mercados de materias primas.

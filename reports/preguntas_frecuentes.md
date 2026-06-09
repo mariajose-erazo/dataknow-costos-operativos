@@ -12,7 +12,7 @@ El análisis permite anticipar posibles desviaciones presupuestales, monitorear 
 
 ### ¿Qué equipo representa mayor riesgo presupuestal?
 
-El Equipo 2 representa mayor riesgo presupuestal porque su precio promedio proyectado aumenta aproximadamente 11.94% frente al último precio observado.
+Ambos equipos se proyectan estables en el horizonte de 180 días: el Equipo 1 muestra una variación esperada de +0.95% y el Equipo 2 de -1.46% frente al último precio observado. No se anticipa un aumento significativo de costos en ninguno de los dos; el Equipo 1 es el único que presenta una variación al alza, aunque marginal.
 
 ### ¿Qué decisión puede tomar la gerencia con estos resultados?
 
@@ -108,11 +108,11 @@ Las proyecciones de ARIMA presentan errores menores al 7% en validación tempora
 
 ### ¿Cuál es la proyección para el Equipo 1?
 
-El Equipo 1 presenta un precio actual de 451.73 y un precio promedio proyectado de 452.58, con una variación esperada de 0.19%.
+El Equipo 1 presenta un precio actual de 451.73 y un precio promedio proyectado de 456.03, con una variación esperada de +0.95%.
 
 ### ¿Cuál es la proyección para el Equipo 2?
 
-El Equipo 2 presenta un precio actual de 955.35 y un precio promedio proyectado de 1069.38, con una variación esperada de 11.94%.
+El Equipo 2 presenta un precio actual de 955.35 y un precio promedio proyectado de 941.42, con una variación esperada de -1.46%.
 
 ---
 

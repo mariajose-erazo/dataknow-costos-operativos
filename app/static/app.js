@@ -5,6 +5,15 @@ function saveConversations() {
     localStorage.setItem("conversations", JSON.stringify(conversations));
 }
 
+// TEMPORAL: limpia el historial de pruebas guardado en Local Storage.
+function clearChatHistory() {
+    localStorage.removeItem("conversations");
+    conversations = [];
+    currentConversationId = null;
+    newConversation();
+    console.log("Historial de chat eliminado de Local Storage.");
+}
+
 function newConversation() {
     const conversation = {
         id: Date.now(),

@@ -12,8 +12,8 @@ El objetivo es identificar qué materias primas explican el comportamiento de ca
 - El Equipo 2 está principalmente relacionado con Price_Z.
 - La regresión lineal fue el mejor modelo para explicar los precios de los equipos.
 - ARIMA fue el mejor modelo de forecasting frente a Prophet.
-- Para el Equipo 1 se proyecta una variación aproximada de 0.19%.
-- Para el Equipo 2 se proyecta una variación aproximada de 11.94%.
+- Para el Equipo 1 se proyecta una variación aproximada de +0.95%.
+- Para el Equipo 2 se proyecta una variación aproximada de -1.46%.
 
 ## Recomendación general
 
