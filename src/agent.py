@@ -246,6 +246,84 @@ cambios regulatorios ni reentrenamiento del modelo.
 """
 
 
+SPANISH_MONTHS = {
+    "enero": 1,
+    "febrero": 2,
+    "marzo": 3,
+    "abril": 4,
+    "mayo": 5,
+    "junio": 6,
+    "julio": 7,
+    "agosto": 8,
+    "septiembre": 9,
+    "setiembre": 9,
+    "octubre": 10,
+    "noviembre": 11,
+    "diciembre": 12,
+}
+
+
+def _parse_forecast_fecha(question_lower: str) -> Optional[str]:
+    """Extrae una fecha en formatos ISO, numérico o texto en español."""
+    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", question_lower)
+    if date_match:
+        return date_match.group(1)
+
+    date_match = re.search(
+        r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})",
+        question_lower,
+    )
+    if date_match:
+        day = int(date_match.group(1))
+        month = int(date_match.group(2))
+        year = int(date_match.group(3))
+        if year < 100:
+            year += 2000
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    months_pattern = "|".join(SPANISH_MONTHS.keys())
+
+    date_match = re.search(
+        rf"(\d{{1,2}})\s+de\s+({months_pattern})\s+de\s+(\d{{4}})",
+        question_lower,
+    )
+    if date_match:
+        day = int(date_match.group(1))
+        month = SPANISH_MONTHS[date_match.group(2)]
+        year = int(date_match.group(3))
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    date_match = re.search(
+        rf"({months_pattern})\s+(\d{{1,2}})(?:\s+de)?\s+(\d{{4}})",
+        question_lower,
+    )
+    if date_match:
+        month = SPANISH_MONTHS[date_match.group(1)]
+        day = int(date_match.group(2))
+        year = int(date_match.group(3))
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    date_match = re.search(
+        rf"(\d{{1,2}})\s+({months_pattern})\s+(\d{{4}})",
+        question_lower,
+    )
+    if date_match:
+        day = int(date_match.group(1))
+        month = SPANISH_MONTHS[date_match.group(2)]
+        year = int(date_match.group(3))
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    return None
+
+
+def _parse_forecast_equipo(question_lower: str) -> Optional[int]:
+    if "equipo 1" in question_lower or "equipo1" in question_lower:
+        return 1
+    if "equipo 2" in question_lower or "equipo2" in question_lower:
+        return 2
+    return None
+
+
 def detect_forecast_date_question(question: str) -> Optional[Dict[str, object]]:
     question_lower = question.lower()
 
@@ -263,31 +341,8 @@ def detect_forecast_date_question(question: str) -> Optional[Dict[str, object]]:
     if not any(word in question_lower for word in forecast_words):
         return None
 
-    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", question_lower)
-
-    if date_match:
-        fecha = date_match.group(1)
-    else:
-        date_match = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", question_lower)
-
-        if not date_match:
-            return None
-
-        day = int(date_match.group(1))
-        month = int(date_match.group(2))
-        year = int(date_match.group(3))
-
-        if year < 100:
-            year += 2000
-
-        fecha = f"{year:04d}-{month:02d}-{day:02d}"
-
-    if "equipo 1" in question_lower or "equipo1" in question_lower:
-        equipo = 1
-    elif "equipo 2" in question_lower or "equipo2" in question_lower:
-        equipo = 2
-    else:
-        return None
+    fecha = _parse_forecast_fecha(question_lower)
+    equipo = _parse_forecast_equipo(question_lower)
 
     return {
         "equipo": equipo,
@@ -324,6 +379,18 @@ def build_forecast_context(question: str) -> str:
 
     equipo = forecast_request["equipo"]
     fecha = forecast_request["fecha"]
+
+    if fecha and not equipo:
+        return (
+            "Puedo consultar el forecast, pero necesito saber "
+            "si te refieres al Equipo 1 o al Equipo 2."
+        )
+
+    if equipo and not fecha:
+        return "Necesito una fecha para consultar el forecast."
+
+    if not fecha or not equipo:
+        return ""
 
     forecast_result = get_forecast_by_date(
         equipo=equipo,
@@ -367,9 +434,8 @@ Valor esperado:
 {forecast_result["forecast"]:.2f}
 
 Rango probable:
-{forecast_result["lower_bound"]:.2f}
--
-{forecast_result["upper_bound"]:.2f}
+Mín: {forecast_result["lower_bound"]:.2f}
+Máx: {forecast_result["upper_bound"]:.2f}
 
 Confiabilidad:
 {confidence_score:.2f}%
