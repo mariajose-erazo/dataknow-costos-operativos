@@ -285,6 +285,22 @@ Entre las capacidades esperadas se consideran:
 - Arquitectura multiusuario con autenticación y gestión de permisos.
 
 ---
+## Estado actual del desarrollo
+
+**Versión del documento:** MVP v1.0
+
+Estado general del proyecto:
+
+- ✅ Product Guide definido.
+- ✅ Notebook 01 convertido en fuente de conocimiento estructurado.
+- 🟡 Notebook 02 en proceso de ingeniería de conocimiento.
+- ⬜ Notebook 03 pendiente de revisión arquitectónica.
+- ⬜ Notebook 04 pendiente de revisión arquitectónica.
+- ⬜ Notebook 05 pendiente de construcción.
+- ⬜ Construcción de la carpeta `knowledge/`.
+- ⬜ Integración con Azure AI Search.
+- ⬜ MVP funcional del asistente.
+
 
 # 6. Registro de Decisiones Arquitectónicas (ADR)
 
@@ -342,4 +358,12 @@ La arquitectura cloud, la arquitectura RAG, la base de conocimiento, el desplieg
 
 ### Justificación
 Esta separación permite mantener el documento principal estable, facilita el mantenimiento de la documentación y evita mezclar decisiones funcionales con detalles de implementación.
+
+
+================
+---
+
+**Última actualización:**
+Ingeniería de Conocimiento completada para el Notebook 01.
+Próxima actividad: Ingeniería de Conocimiento del Notebook 02.
 
