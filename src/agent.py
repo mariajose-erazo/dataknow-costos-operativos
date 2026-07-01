@@ -325,6 +325,20 @@ def _parse_forecast_equipo(question_lower: str) -> Optional[int]:
     return None
 
 
+def _detect_invalid_equipo(question_lower: str) -> Optional[int]:
+    match = re.search(r"equipo\s*(\d+)", question_lower)
+
+    if not match:
+        return None
+
+    equipo = int(match.group(1))
+
+    if equipo not in [1, 2]:
+        return equipo
+
+    return None
+
+
 def detect_forecast_date_question(question: str) -> Optional[Dict[str, object]]:
     question_lower = question.lower()
 
@@ -368,6 +382,22 @@ def build_forecast_context(question: str) -> str:
 
     if not forecast_request:
         return ""
+
+    question_lower = question.lower()
+    invalid_equipo = _detect_invalid_equipo(question_lower)
+
+    if invalid_equipo:
+        return f"""
+FORECAST NO DISPONIBLE
+
+El MVP solo tiene forecast operativo para Equipo 1 y Equipo 2.
+
+Equipo consultado: Equipo {invalid_equipo}
+
+Equipos disponibles:
+- Equipo 1
+- Equipo 2
+"""
 
     equipo = forecast_request["equipo"]
     fecha = forecast_request["fecha"]

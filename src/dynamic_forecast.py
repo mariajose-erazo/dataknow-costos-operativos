@@ -51,13 +51,13 @@ def _classify_uncertainty(uncertainty_pct: float) -> str:
 
 
 def _classify_horizon(days_ahead: int) -> str:
-    if days_ahead <= 180:
+    if days_ahead <= 30:
         return "Corto plazo"
 
-    if days_ahead <= 365:
+    if days_ahead <= 90:
         return "Mediano plazo"
 
-    return "Largo plazo"
+    return "Largo plazo operativo"
 
 
 def _build_historical_response(
