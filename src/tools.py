@@ -1,7 +1,12 @@
 from pathlib import Path
-from typing import Dict
+from typing import Any
 
 import pandas as pd
+
+try:
+    from .dynamic_forecast import get_dynamic_forecast_by_date
+except ImportError:
+    from dynamic_forecast import get_dynamic_forecast_by_date
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,16 +29,16 @@ LINEAR_COEFFICIENTS = {
 }
 
 
-def load_latest_values() -> Dict[str, float]:
-    """
-    Carga el último registro disponible del dataset procesado.
-    """
+VALID_MATERIALS = ["Price_X", "Price_Y", "Price_Z"]
+VALID_TARGETS = ["Price_Equipo1", "Price_Equipo2"]
+
+
+def load_latest_values() -> dict[str, Any]:
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {DATA_PATH}")
 
-    df = pd.read_csv(DATA_PATH)
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values("Date")
+    df = pd.read_csv(DATA_PATH, parse_dates=["Date"])
+    df = df.sort_values("Date").reset_index(drop=True)
 
     latest = df.iloc[-1]
 
@@ -51,24 +56,19 @@ def simulate_material_change(
     material: str,
     percent_change: float,
     target: str = "Price_Equipo2",
-) -> Dict[str, float]:
-    """
-    Simula el impacto aproximado de un cambio porcentual en una materia prima
-    sobre el precio estimado de un equipo usando coeficientes de regresión lineal.
-    """
+) -> dict[str, Any]:
     latest = load_latest_values()
 
-    if material not in ["Price_X", "Price_Y", "Price_Z"]:
+    if material not in VALID_MATERIALS:
         raise ValueError("Materia prima no válida.")
 
-    if target not in ["Price_Equipo1", "Price_Equipo2"]:
+    if target not in VALID_TARGETS:
         raise ValueError("Equipo objetivo no válido.")
 
     current_material_price = latest[material]
     current_target_price = latest[target]
 
     absolute_material_change = current_material_price * (percent_change / 100)
-
     coefficient = LINEAR_COEFFICIENTS[target][material]
 
     estimated_target_change = coefficient * absolute_material_change
@@ -89,72 +89,27 @@ def simulate_material_change(
         "current_target_price": round(current_target_price, 2),
         "estimated_target_change": round(estimated_target_change, 2),
         "estimated_new_target_price": round(estimated_new_target_price, 2),
-        "estimated_target_percent_change": round(estimated_target_percent_change, 2),
+        "estimated_target_percent_change": round(
+            estimated_target_percent_change,
+            2,
+        ),
     }
 
 
-def get_forecast_by_date(equipo: int, fecha: str) -> Dict[str, object]:
-    """
-    Consulta el forecast para una fecha específica.
-
-    Args:
-        equipo: 1 o 2.
-        fecha: fecha en formato YYYY-MM-DD.
-
-    Returns:
-        Diccionario con forecast, límite inferior y límite superior.
-    """
-    if equipo == 1:
-        file_path = PROCESSED_PATH / "forecast_equipo1.csv"
-    elif equipo == 2:
-        file_path = PROCESSED_PATH / "forecast_equipo2.csv"
-    else:
-        raise ValueError("Equipo debe ser 1 o 2.")
-
-    if not file_path.exists():
-        raise FileNotFoundError(f"No se encontró el archivo: {file_path}")
-
-    df = pd.read_csv(file_path)
-
-    fecha_col = df.columns[0]
-
-    df[fecha_col] = pd.to_datetime(df[fecha_col])
-    target_date = pd.to_datetime(fecha)
-
-    row = df[df[fecha_col] == target_date]
-
-    if row.empty:
-        min_date = df[fecha_col].min().date()
-        max_date = df[fecha_col].max().date()
-
-        return {
-            "found": False,
-            "equipo": equipo,
-            "fecha": fecha,
-            "message": (
-                f"No existe forecast para {fecha}. "
-                f"El rango disponible es {min_date} a {max_date}."
-            ),
-            "available_start": str(min_date),
-            "available_end": str(max_date),
-        }
-
-    row = row.iloc[0]
-
-    return {
-        "found": True,
-        "equipo": equipo,
-        "fecha": fecha,
-        "forecast": round(float(row.iloc[1]), 2),
-        "lower_bound": round(float(row.iloc[2]), 2),
-        "upper_bound": round(float(row.iloc[3]), 2),
-    }
+def get_forecast_by_date(
+    equipo: int,
+    fecha: str,
+) -> dict[str, Any]:
+    return get_dynamic_forecast_by_date(
+        equipo=equipo,
+        fecha=fecha,
+    )
 
 
 if __name__ == "__main__":
     print(
         get_forecast_by_date(
-            equipo=2,
-            fecha="2023-09-05",
+            equipo=1,
+            fecha="2023-11-03",
         )
     )

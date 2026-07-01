@@ -20,9 +20,10 @@ from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 
-from tools import simulate_material_change, get_forecast_by_date
-from dynamic_forecast import get_dynamic_forecast_by_date
-
+try:
+    from .tools import simulate_material_change, get_forecast_by_date
+except ImportError:
+    from tools import simulate_material_change, get_forecast_by_date
 load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -350,28 +351,19 @@ def detect_forecast_date_question(question: str) -> Optional[Dict[str, object]]:
     }
 
 def get_risk_indicator(confidence_score: float) -> str:
-
     if confidence_score >= 80:
-        return "🟢 Baja"
+        return "Baja"
 
     if confidence_score >= 50:
-        return "🟡 Media"
+        return "Media"
 
     if confidence_score >= 20:
-        return "🟠 Alta"
+        return "Alta"
 
-    return "🔴 Muy Alta"
+    return "Muy Alta"
 
 
 def build_forecast_context(question: str) -> str:
-    """
-    Construye contexto adicional si la pregunta requiere forecast por fecha.
-
-    Primero intenta consultar el forecast precalculado en CSV.
-    Si la fecha no existe en el CSV y es posterior al histórico,
-    genera un forecast dinámico con ARIMA.
-    """
-
     forecast_request = detect_forecast_date_question(question)
 
     if not forecast_request:
@@ -397,159 +389,86 @@ def build_forecast_context(question: str) -> str:
         fecha=fecha,
     )
 
-    # =====================================================
-    # FORECAST PRECALCULADO (CSV)
-    # =====================================================
-
-    if forecast_result["found"]:
-
-        uncertainty_width = (
-            forecast_result["upper_bound"]
-            - forecast_result["lower_bound"]
-        )
-
-        uncertainty_pct = (
-            uncertainty_width
-            / forecast_result["forecast"]
-        ) * 100
-
-        confidence_score = max(
-            0,
-            100 - uncertainty_pct
-        )
-
-        risk_indicator = get_risk_indicator(
-            confidence_score
-        )
-
+    if forecast_result["type"] == "historical":
         return f"""
-╔════════════════════════════════════╗
-║ FORECAST EQUIPO {forecast_result["equipo"]}
-╚════════════════════════════════════╝
+VALOR HISTÓRICO - EQUIPO {forecast_result["equipo"]}
 
-Fecha consultada:
-{forecast_result["fecha"]}
+Fecha consultada: {forecast_result["fecha"]}
 
-Valor esperado:
-{forecast_result["forecast"]:.2f}
+Valor observado: {forecast_result["value"]:.2f}
 
-Rango probable:
-Mín: {forecast_result["lower_bound"]:.2f}
-Máx: {forecast_result["upper_bound"]:.2f}
-
-Confiabilidad:
-{confidence_score:.2f}%
-
-Nivel de riesgo:
-{risk_indicator}
+Última fecha histórica disponible: {forecast_result["last_historical_date"]}
 
 Interpretación:
-
-El valor más probable para la fecha
-consultada es {forecast_result["forecast"]:.2f}.
-
-Existe incertidumbre asociada al modelo,
-por lo que el valor real podría ubicarse
-dentro del rango estimado.
+La fecha consultada pertenece al histórico disponible. Por lo tanto, se reporta el valor real observado y no una predicción.
 """
 
-    # =====================================================
-    # FORECAST DINÁMICO
-    # =====================================================
-
-    dynamic_result = get_dynamic_forecast_by_date(
-        equipo=equipo,
-        fecha=fecha,
-    )
-
-    if not dynamic_result["found"]:
-
+    if forecast_result["type"] == "out_of_forecast_horizon":
         return f"""
-Resultado de consulta de forecast por fecha:
+FORECAST NO DISPONIBLE
 
-- Equipo consultado:
-  Equipo {equipo}
+Equipo consultado: Equipo {forecast_result["equipo"]}
 
-- Fecha consultada:
-  {fecha}
+Fecha consultada: {forecast_result["fecha"]}
 
-- Resultado:
-  {dynamic_result["message"]}
+Resultado:
+{forecast_result["message"]}
+
+Última fecha histórica: {forecast_result["last_historical_date"]}
+
+Horizonte operativo disponible: {forecast_result["forecast_start_date"]} a {forecast_result["forecast_end_date"]}
 
 Advertencia:
-
-No fue posible generar un forecast
-para esta fecha.
+No se debe generar una predicción para esta fecha porque está fuera del horizonte operativo aprobado para el MVP.
 """
 
-    confidence_score = max(
-        0,
-        100 - dynamic_result["uncertainty_pct"]
-    )
+    if not forecast_result["found"]:
+        return f"""
+FORECAST NO DISPONIBLE
 
-    risk_indicator = get_risk_indicator(
-        confidence_score
-    )
+Equipo consultado: Equipo {equipo}
+
+Fecha consultada: {fecha}
+
+Resultado:
+{forecast_result["message"]}
+"""
+
+    uncertainty_pct = forecast_result["uncertainty_pct"]
+    confidence_score = max(0, 100 - uncertainty_pct)
+    risk_indicator = get_risk_indicator(confidence_score)
 
     return f"""
-Resultado de forecast dinámico:
+FORECAST OPERATIVO - EQUIPO {forecast_result["equipo"]}
 
-- Tipo de forecast:
-  Dinámico con ARIMA
+Fecha consultada: {forecast_result["fecha"]}
 
-- Modelo usado:
-  {dynamic_result["model"]}
+Modelo usado: {forecast_result["model"]}
 
-- Equipo consultado:
-  Equipo {dynamic_result["equipo"]}
+Fuente: {forecast_result["source_file"]}
 
-- Fecha consultada:
-  {dynamic_result["fecha"]}
+Última fecha histórica: {forecast_result["last_historical_date"]}
 
-- Última fecha histórica:
-  {dynamic_result["last_historical_date"]}
+Días proyectados: {forecast_result["days_ahead"]}
 
-- Días proyectados:
-  {dynamic_result["days_ahead"]}
+Horizonte: {forecast_result["forecast_horizon"]}
 
-- Horizonte:
-  {dynamic_result["forecast_horizon"]}
+Valor esperado: {forecast_result["forecast"]:.2f}
 
---------------------------------------------------
+Rango probable:
+- Mínimo: {forecast_result["lower_bound"]:.2f}
+- Máximo: {forecast_result["upper_bound"]:.2f}
 
-- Forecast estimado:
-  {dynamic_result["forecast"]}
+Confiabilidad estimada: {confidence_score:.2f}%
 
-- Confiabilidad estimada:
-  {confidence_score:.2f}%
+Nivel de incertidumbre: {forecast_result["uncertainty_level"]}
 
-- Nivel de incertidumbre:
-  {dynamic_result["uncertainty_level"]}
+Nivel de riesgo: {risk_indicator}
 
---------------------------------------------------
+Interpretación:
+El valor esperado para la fecha consultada es {forecast_result["forecast"]:.2f}.
 
-- Rango esperado:
-
-  Mínimo:
-  {dynamic_result["lower_bound"]}
-
-  Máximo:
-  {dynamic_result["upper_bound"]}
-
---------------------------------------------------
-
-Advertencia:
-
-La fecha consultada se encuentra
-a {dynamic_result["days_ahead"]} días
-del último dato histórico.
-
-La incertidumbre aumenta conforme
-crece la distancia respecto al histórico.
-
-Este forecast debe interpretarse como
-un escenario probable y no como un
-valor exacto.
+El resultado debe interpretarse como una estimación operativa y no como un valor exacto.
 """
 
 
@@ -557,9 +476,6 @@ def answer_with_local_context(
     question: str,
     history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
-    if not GOOGLE_API_KEY:
-        raise ValueError("No se encontró GOOGLE_API_KEY. Configura tu archivo .env.")
-
     # =====================================================
     # RESPUESTA DIRECTA PARA FORECASTS
     # =====================================================
@@ -568,6 +484,9 @@ def answer_with_local_context(
 
     if forecast_context:
         return forecast_context
+
+    if not GOOGLE_API_KEY:
+        raise ValueError("No se encontró GOOGLE_API_KEY. Configura tu archivo .env.")
 
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI

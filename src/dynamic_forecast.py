@@ -1,243 +1,211 @@
 from pathlib import Path
-from typing import Dict
+from typing import Any
 
 import pandas as pd
-from statsmodels.tsa.arima.model import ARIMA
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-DATA_PATH = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "historico_equipos_limpio.csv"
-)
+DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
 
+HISTORICAL_PATH = DATA_PROCESSED / "historico_equipos_limpio.csv"
+METADATA_PATH = DATA_PROCESSED / "forecast_metadata.json"
 
-ARIMA_ORDERS = {
-    1: (1, 1, 1),
-    2: (1, 1, 1),
+FORECAST_PATHS = {
+    1: DATA_PROCESSED / "forecast_equipo1.csv",
+    2: DATA_PROCESSED / "forecast_equipo2.csv",
 }
+
+
+def _validate_equipo(equipo: int) -> None:
+    if equipo not in FORECAST_PATHS:
+        raise ValueError("Equipo debe ser 1 o 2.")
+
+
+def _load_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"No se encontró el archivo: {path}")
+
+    df = pd.read_csv(path, parse_dates=["Date"])
+    return df.sort_values("Date").reset_index(drop=True)
+
+
+def _load_metadata() -> dict[str, Any]:
+    if not METADATA_PATH.exists():
+        return {}
+
+    return pd.read_json(METADATA_PATH, typ="series").to_dict()
+
+
+def _classify_uncertainty(uncertainty_pct: float) -> str:
+    if uncertainty_pct < 20:
+        return "Baja"
+
+    if uncertainty_pct < 50:
+        return "Media"
+
+    if uncertainty_pct < 100:
+        return "Alta"
+
+    return "Muy Alta"
+
+
+def _classify_horizon(days_ahead: int) -> str:
+    if days_ahead <= 180:
+        return "Corto plazo"
+
+    if days_ahead <= 365:
+        return "Mediano plazo"
+
+    return "Largo plazo"
+
+
+def _build_historical_response(
+    equipo: int,
+    fecha: str,
+    target_date: pd.Timestamp,
+    historical_df: pd.DataFrame,
+    last_historical_date: pd.Timestamp,
+) -> dict[str, Any]:
+    value_col = f"Price_Equipo{equipo}"
+
+    row = historical_df[historical_df["Date"] == target_date]
+
+    if row.empty:
+        return {
+            "found": False,
+            "type": "historical",
+            "message": (
+                f"La fecha {fecha} está dentro del histórico, "
+                "pero no existe registro exacto para ese día."
+            ),
+            "last_historical_date": str(last_historical_date.date()),
+        }
+
+    return {
+        "found": True,
+        "type": "historical",
+        "equipo": equipo,
+        "fecha": str(target_date.date()),
+        "value": round(float(row.iloc[0][value_col]), 2),
+        "last_historical_date": str(last_historical_date.date()),
+    }
+
+
+def _build_forecast_response(
+    equipo: int,
+    target_date: pd.Timestamp,
+    forecast_df: pd.DataFrame,
+    metadata: dict[str, Any],
+    last_historical_date: pd.Timestamp,
+) -> dict[str, Any]:
+    row = forecast_df[forecast_df["Date"] == target_date]
+
+    if row.empty:
+        return {
+            "found": False,
+            "type": "forecast",
+            "equipo": equipo,
+            "fecha": str(target_date.date()),
+            "message": (
+                "La fecha solicitada no existe dentro del forecast operativo "
+                "generado por el Notebook 03."
+            ),
+            "last_historical_date": str(last_historical_date.date()),
+        }
+
+    row = row.iloc[0]
+
+    forecast_value = float(row["Forecast"])
+    lower = float(row["Lower"])
+    upper = float(row["Upper"])
+
+    uncertainty_width = upper - lower
+    uncertainty_pct = uncertainty_width / forecast_value * 100
+
+    days_ahead = (target_date - last_historical_date).days
+
+    return {
+        "found": True,
+        "type": "operational_forecast",
+        "equipo": equipo,
+        "fecha": str(target_date.date()),
+        "last_historical_date": str(last_historical_date.date()),
+        "days_ahead": days_ahead,
+        "forecast": round(forecast_value, 2),
+        "lower_bound": round(lower, 2),
+        "upper_bound": round(upper, 2),
+        "uncertainty_pct": round(float(uncertainty_pct), 2),
+        "uncertainty_level": _classify_uncertainty(uncertainty_pct),
+        "forecast_horizon": _classify_horizon(days_ahead),
+        "model": metadata.get("modelo", "ARIMA(1, 1, 1)"),
+        "source_file": FORECAST_PATHS[equipo].name,
+    }
 
 
 def get_dynamic_forecast_by_date(
     equipo: int,
-    fecha: str
-) -> Dict[str, object]:
+    fecha: str,
+) -> dict[str, Any]:
     """
-    Genera un forecast dinámico con ARIMA desde el último
-    dato histórico hasta la fecha solicitada.
+    Consulta el forecast operativo generado por el Notebook 03.
+
+    Esta función no entrena modelos en tiempo de consulta.
+    Lee los artefactos persistidos en data/processed y devuelve
+    el valor esperado, el límite inferior y el límite superior para
+    la fecha solicitada.
     """
 
-    if equipo not in [1, 2]:
-        raise ValueError(
-            "Equipo debe ser 1 o 2."
+    _validate_equipo(equipo)
+
+    historical_df = _load_csv(HISTORICAL_PATH)
+    forecast_df = _load_csv(FORECAST_PATHS[equipo])
+    metadata = _load_metadata()
+
+    target_date = pd.Timestamp(fecha)
+
+    last_historical_date = historical_df["Date"].max()
+    forecast_start_date = forecast_df["Date"].min()
+    forecast_end_date = forecast_df["Date"].max()
+
+    if target_date <= last_historical_date:
+        return _build_historical_response(
+            equipo=equipo,
+            fecha=fecha,
+            target_date=target_date,
+            historical_df=historical_df,
+            last_historical_date=last_historical_date,
         )
 
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(
-            f"No se encontró el archivo: {DATA_PATH}"
-        )
-
-    value_col = f"Price_Equipo{equipo}"
-
-    df = pd.read_csv(DATA_PATH)
-
-    df["Date"] = pd.to_datetime(
-        df["Date"]
-    )
-
-    df = df.sort_values("Date")
-
-    last_date = df["Date"].max()
-
-    target_date = pd.to_datetime(
-        fecha
-    )
-
-    # =====================================================
-    # FECHA DENTRO DEL HISTÓRICO
-    # =====================================================
-
-    if target_date <= last_date:
-
-        row = df[
-            df["Date"] == target_date
-        ]
-
-        if row.empty:
-
-            return {
-                "found": False,
-                "type": "historical",
-                "message": (
-                    f"La fecha {fecha} está dentro "
-                    f"del histórico, pero no existe "
-                    f"registro exacto para ese día."
-                ),
-                "last_historical_date": str(
-                    last_date.date()
-                ),
-            }
-
+    if target_date < forecast_start_date or target_date > forecast_end_date:
         return {
-            "found": True,
-            "type": "historical",
+            "found": False,
+            "type": "out_of_forecast_horizon",
             "equipo": equipo,
-            "fecha": fecha,
-            "value": round(
-                float(
-                    row.iloc[0][value_col]
-                ),
-                2,
+            "fecha": str(target_date.date()),
+            "message": (
+                "La fecha solicitada está fuera del horizonte operativo "
+                "generado por el Notebook 03."
             ),
-            "last_historical_date": str(
-                last_date.date()
-            ),
+            "last_historical_date": str(last_historical_date.date()),
+            "forecast_start_date": str(forecast_start_date.date()),
+            "forecast_end_date": str(forecast_end_date.date()),
+            "model": metadata.get("modelo", "ARIMA(1, 1, 1)"),
         }
 
-    # =====================================================
-    # FORECAST DINÁMICO
-    # =====================================================
-
-    steps = (
-        target_date - last_date
-    ).days
-
-    series = (
-        df
-        .set_index("Date")[value_col]
-        .asfreq("D")
+    return _build_forecast_response(
+        equipo=equipo,
+        target_date=target_date,
+        forecast_df=forecast_df,
+        metadata=metadata,
+        last_historical_date=last_historical_date,
     )
-
-    series = series.interpolate(
-        method="time"
-    )
-
-    order = ARIMA_ORDERS[equipo]
-
-    model = ARIMA(
-        series,
-        order=order
-    )
-
-    fitted = model.fit()
-
-    forecast_result = (
-        fitted.get_forecast(
-            steps=steps
-        )
-    )
-
-    forecast_mean = (
-        forecast_result.predicted_mean
-    )
-
-    conf_int = (
-        forecast_result.conf_int()
-    )
-
-    forecast_value = (
-        forecast_mean.iloc[-1]
-    )
-
-    lower = conf_int.iloc[-1, 0]
-
-    upper = conf_int.iloc[-1, 1]
-
-    # =====================================================
-    # INCERTIDUMBRE
-    # =====================================================
-
-    uncertainty_width = (
-        upper - lower
-    )
-
-    uncertainty_pct = (
-        uncertainty_width
-        / forecast_value
-    ) * 100
-
-    if uncertainty_pct < 20:
-        uncertainty_level = "Baja"
-
-    elif uncertainty_pct < 50:
-        uncertainty_level = "Media"
-
-    elif uncertainty_pct < 100:
-        uncertainty_level = "Alta"
-
-    else:
-        uncertainty_level = "Muy Alta"
-
-    # =====================================================
-    # HORIZONTE DE PRONÓSTICO
-    # =====================================================
-
-    if steps <= 180:
-        forecast_horizon = (
-            "Corto plazo"
-        )
-
-    elif steps <= 365:
-        forecast_horizon = (
-            "Mediano plazo"
-        )
-
-    else:
-        forecast_horizon = (
-            "Largo plazo"
-        )
-
-    return {
-        "found": True,
-        "type": (
-            "dynamic_arima_forecast"
-        ),
-        "equipo": equipo,
-        "fecha": str(
-            target_date.date()
-        ),
-        "last_historical_date": str(
-            last_date.date()
-        ),
-        "days_ahead": steps,
-        "forecast": round(
-            float(forecast_value),
-            2,
-        ),
-        "lower_bound": round(
-            float(lower),
-            2,
-        ),
-        "upper_bound": round(
-            float(upper),
-            2,
-        ),
-        "uncertainty_pct": round(
-            float(
-                uncertainty_pct
-            ),
-            2,
-        ),
-        "uncertainty_level": (
-            uncertainty_level
-        ),
-        "forecast_horizon": (
-            forecast_horizon
-        ),
-        "model": (
-            f"ARIMA{order}"
-        ),
-    }
 
 
 if __name__ == "__main__":
-
     print(
         get_dynamic_forecast_by_date(
-            equipo=2,
-            fecha="2026-06-05",
+            equipo=1,
+            fecha="2023-11-03",
         )
     )

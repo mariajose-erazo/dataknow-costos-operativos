@@ -1,0 +1,113 @@
+{
+    "modelo": "ARIMA(1, 1, 1)",
+    "horizonte_dias": 180,
+    "ultima_fecha_historica": "2023-08-31",
+    "fecha_inicio_forecast": "2023-09-01",
+    "fecha_fin_forecast": "2024-02-27",
+    "equipos": [
+        "Equipo 1",
+        "Equipo 2"
+    ],
+    "archivos": {
+        "Equipo 1": "forecast_equipo1.csv",
+        "Equipo 2": "forecast_equipo2.csv"
+    },
+    "metricas_validacion": [
+        {
+            "Equipo": "Equipo 1",
+            "MAE": 31.59,
+            "RMSE": 34.92,
+            "MAPE_%": 6.55,
+            "Cobertura_IC_%": 98.26
+        },
+        {
+            "Equipo": "Equipo 2",
+            "MAE": 52.75,
+            "RMSE": 63.07,
+            "MAPE_%": 5.47,
+            "Cobertura_IC_%": 97.09
+        }
+    ],
+    "resumen_incertidumbre": [
+        {
+            "Equipo": "Equipo 1",
+            "Dia_horizonte": 1,
+            "Date": "2023-09-01 00:00:00",
+            "Forecast": 457.2,
+            "Lower": 435.15,
+            "Upper": 479.25,
+            "Ancho_IC": 44.1,
+            "Ancho_IC_%": 9.65
+        },
+        {
+            "Equipo": "Equipo 1",
+            "Dia_horizonte": 30,
+            "Date": "2023-09-30 00:00:00",
+            "Forecast": 457.01,
+            "Lower": 391.27,
+            "Upper": 522.75,
+            "Ancho_IC": 131.49,
+            "Ancho_IC_%": 28.77
+        },
+        {
+            "Equipo": "Equipo 1",
+            "Dia_horizonte": 90,
+            "Date": "2023-11-29 00:00:00",
+            "Forecast": 457.01,
+            "Lower": 346.21,
+            "Upper": 567.81,
+            "Ancho_IC": 221.6,
+            "Ancho_IC_%": 48.49
+        },
+        {
+            "Equipo": "Equipo 1",
+            "Dia_horizonte": 180,
+            "Date": "2024-02-27 00:00:00",
+            "Forecast": 457.01,
+            "Lower": 301.42,
+            "Upper": 612.6,
+            "Ancho_IC": 311.17,
+            "Ancho_IC_%": 68.09
+        },
+        {
+            "Equipo": "Equipo 2",
+            "Dia_horizonte": 1,
+            "Date": "2023-09-01 00:00:00",
+            "Forecast": 941.4,
+            "Lower": 898.02,
+            "Upper": 984.78,
+            "Ancho_IC": 86.76,
+            "Ancho_IC_%": 9.22
+        },
+        {
+            "Equipo": "Equipo 2",
+            "Dia_horizonte": 30,
+            "Date": "2023-09-30 00:00:00",
+            "Forecast": 941.32,
+            "Lower": 819.97,
+            "Upper": 1062.66,
+            "Ancho_IC": 242.69,
+            "Ancho_IC_%": 25.78
+        },
+        {
+            "Equipo": "Equipo 2",
+            "Dia_horizonte": 90,
+            "Date": "2023-11-29 00:00:00",
+            "Forecast": 941.32,
+            "Lower": 738.13,
+            "Upper": 1144.5,
+            "Ancho_IC": 406.37,
+            "Ancho_IC_%": 43.17
+        },
+        {
+            "Equipo": "Equipo 2",
+            "Dia_horizonte": 180,
+            "Date": "2024-02-27 00:00:00",
+            "Forecast": 941.32,
+            "Lower": 656.49,
+            "Upper": 1226.14,
+            "Ancho_IC": 569.64,
+            "Ancho_IC_%": 60.52
+        }
+    ]
+}

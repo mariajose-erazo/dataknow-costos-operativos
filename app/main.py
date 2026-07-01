@@ -33,7 +33,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
-    history: Optional[List[ChatMessage]] = []
+    history: Optional[List[ChatMessage]] = None
 
 
 class ChatResponse(BaseModel):
@@ -51,6 +51,13 @@ def health():
 @app.get("/", response_class=HTMLResponse)
 def home():
     index_path = PROJECT_ROOT / "app" / "templates" / "index.html"
+
+    if not index_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No se encontró el archivo index.html.",
+        )
+
     return index_path.read_text(encoding="utf-8")
 
 
@@ -68,7 +75,7 @@ def chat(request: ChatRequest):
                 "role": message.role,
                 "content": message.content,
             }
-            for message in request.history
+            for message in (request.history or [])
         ]
 
         answer = answer_with_local_context(
@@ -79,4 +86,7 @@ def chat(request: ChatRequest):
         return ChatResponse(answer=answer)
 
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
